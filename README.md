@@ -204,3 +204,7 @@ sudo systemctl restart samba-ad-dc
 ---
 
 Se quiser, posso gerar um **PDF de documentação** para esse passo a passo também. Deseja isso?
+
+sudo net groupmap modify ntgroup="professores" unixgroup=samba-professores
+
+sudo net groupmap modify ntgroup="alunos" unixgroup=samba-alunos
