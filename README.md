@@ -1,468 +1,701 @@
-# Guia: Configuração Cliente Ubuntu para Domínio Samba AD
+Com certeza! Para facilitar o entendimento, vamos detalhar as configurações necessárias tanto para o servidor Ubuntu (que será o Controlador de Domínio Samba Active Directory) quanto para o cliente Ubuntu, explicando cada passo.
 
-## Informações do Ambiente
+Configuração do Servidor Ubuntu (Controlador de Domínio Samba Active Directory)
+O servidor Ubuntu, com o IP 
 
-**Cenário de Rede:**
-- Controlador de Domínio (Ubuntu Server): 192.168.10.2 ✅ (já configurado)
-- Cliente Ubuntu: 192.168.10.4/24 ⚠️ (vamos configurar)
-- Domínio: SAMBA.LOCAL
+192.168.10.2/24, será a peça central da nossa rede, atuando como um Controlador de Domínio Samba.
 
-## FOCO: Configuração do Cliente Ubuntu (192.168.10.4)
 
-### Pré-requisito: Servidor já deve estar funcionando
-O servidor Samba AD em 192.168.10.2 já deve estar configurado e rodando.
+Objetivo: Configurar o Ubuntu Server para ser o Controlador de Domínio Samba Active Directory para o domínio SAMBA.LOCAL.
 
-## Passo 1: Configuração de Rede do Cliente Ubuntu
+Passos:
 
-**IMPORTANTE:** Abra o terminal no seu cliente Ubuntu e execute os comandos abaixo:
+Configuração de Acesso Remoto (SSH)
 
-```bash
-# 1. Verificar interfaces de rede disponíveis
+Para que serve? O SSH (Secure Shell) permite que você acesse e gerencie seu servidor remotamente a partir de outro computador, como o seu cliente Windows. Isso evita a necessidade de um monitor e teclado conectados diretamente ao servidor.
+
+Como fazer:
+
+Primeiro, atualize a lista de pacotes disponíveis:
+
+Bash
+
+sudo apt-get update
+Em seguida, instale o servidor OpenSSH:
+
+Bash
+
+sudo apt-get install openssh-server -y
+O -y no final aceita automaticamente todas as perguntas de confirmação.
+
+Configuração de Rede do Servidor
+
+Para que serve? É crucial que o servidor tenha um endereço IP fixo e consiga se comunicar com a internet e com os clientes na rede local. No nosso caso, o servidor terá o IP 
+
+192.168.10.2/24.
+
+Como fazer:
+
+Identificar interfaces de rede:
+
+Bash
+
 ip -br a
-```
+Este comando mostrará todas as interfaces de rede do seu servidor (por exemplo, 
 
-Você verá algo como:
-```
-lo               UNKNOWN        127.0.0.1/8 ::1/128
-enp0s3           UP             192.168.1.100/24
-enp0s8           DOWN
-```
+enp0s3, enp0s8, enp0s9).  Você precisa identificar qual interface será usada para a rede local (
 
-```bash
-# 2. Configurar a rede para o domínio
-sudo nano /etc/netplan/01-netcfg.yaml
-```
+192.168.10.0/24) e qual, se houver, será para a internet.
 
-**Cole este conteúdo no arquivo (substitua enp0s8 pela sua interface):**
-```yaml
+Acessar o diretório de configuração do Netplan:
+
+Bash
+
+cd /etc/netplan
+Editar o arquivo de configuração do Netplan:
+
+Bash
+
+sudo nano 01-netcfg.yaml # ou o nome do seu arquivo .yaml, pode variar
+Dentro do arquivo, adicione ou modifique as seguintes linhas. Adapte os nomes das interfaces (enp0s3, enp0s8, enp0s9) conforme o que você identificou no comando ip -br a:
+
+YAML
+
 network:
   version: 2
   ethernets:
-    enp0s3:
+    enp0s3: # Exemplo: Interface para a internet, obtém IP via DHCP
       dhcp4: true
-    enp0s8:
-      addresses: [192.168.10.4/24]
+    enp0s8: # Exemplo: Interface para a rede local, IP fixo
+      [cite_start]addresses: [192.168.10.2/24] # IP do servidor 
+    enp0s9: # Exemplo: Outra interface para a internet (se houver), via DHCP
+      dhcp4: true
       nameservers:
-        addresses: [192.168.10.2, 8.8.8.8]
-        search: [samba.local]
-```
+        [cite_start]addresses: [8.8.8.8] # DNS público para resolução de nomes na internet 
+Explicação:
 
-```bash
-# 3. Aplicar a configuração
+
+dhcp4: true: A interface obterá automaticamente um endereço IP via DHCP (comum para conexão com a internet ).
+
+addresses: [192.168.10.2/24]: Define o endereço IP estático para a interface da rede local. O /24 indica a máscara de sub-rede (255.255.255.0).
+
+nameservers: addresses: [8.8.8.8]: Define o servidor DNS primário (aqui, o DNS público do Google) para que o servidor possa resolver nomes de domínio na internet.
+
+Aplicar as configurações de rede:
+
+Bash
+
 sudo netplan apply
+Verificar se as configurações foram aplicadas corretamente:
 
-# 4. Verificar se o IP foi configurado
+Bash
+
 ip -br a
-```
+Confirme se o enp0s8 (ou a interface que você configurou) agora tem o IP 192.168.10.2/24.
 
-Agora você deve ver: `enp0s8 UP 192.168.10.4/24`
+Acesso Remoto via SSH (do Cliente Windows)
 
-## Passo 2: Configuração do Nome da Máquina
+Para que serve? Agora que o SSH está instalado e a rede configurada, você pode acessar o servidor do seu PC Windows.
 
-```bash
-# 1. Definir o nome da máquina cliente
-sudo hostnamectl set-hostname cliente-ubuntu
+Como fazer:
 
-# 2. Verificar o nome
-hostname
-```
+No PowerShell do Windows (ou em um terminal Linux/macOS), digite:
 
-```bash
-# 3. Configurar o arquivo hosts para reconhecer o domínio
-sudo nano /etc/hosts
-```
+Bash
 
-**Substitua TODO o conteúdo do arquivo por:**
-```
-127.0.0.1    localhost
-127.0.1.1    cliente-ubuntu
-192.168.10.2  dc.samba.local dc samba.local
-
-::1      ip6-localhost ip6-loopback
-fe00::0  ip6-localnet
-ff00::0  ip6-mcastprefix
-ff02::1  ip6-allnodes
-ff02::2  ip6-allrouters
-```
-
-## Passo 3: Configuração DNS (Muito Importante!)
-
-```bash
-# 1. Parar e desabilitar o systemd-resolved
-sudo systemctl disable --now systemd-resolved
-
-# 2. Remover o link simbólico
-sudo unlink /etc/resolv.conf
-```
-
-```bash
-# 3. Criar arquivo DNS manual
-sudo nano /etc/resolv.conf
-```
-
-**Cole este conteúdo:**
-```
-nameserver 192.168.10.2
-nameserver 8.8.8.8
-search samba.local
-```
-
-```bash
-# 4. Proteger o arquivo para não ser alterado
-sudo chattr +i /etc/resolv.conf
-
-# 5. Testar se consegue resolver o domínio
-ping -c2 samba.local
-```
-
-**Se o ping funcionar, continue. Se não funcionar, verifique as configurações anteriores.**
-
-## Passo 4: Instalação dos Pacotes Necessários
-
-```bash
-# 1. Atualizar repositórios
-sudo apt-get update
-
-# 2. Instalar pacotes para ingressar no domínio
-sudo apt install -y realmd sssd sssd-tools libnss-sss libpam-sss adcli samba-common-bin packagekit krb5-user
-```
-
-**Durante a instalação, você será perguntado sobre Kerberos:**
-- **Realm padrão:** `SAMBA.LOCAL` (digite exatamente assim e aperte Enter)
-- **Servidor Kerberos:** `dc.samba.local` (digite exatamente assim e aperte Enter)  
-- **Servidor administrativo:** `dc.samba.local` (digite exatamente assim e aperte Enter)
-
-**IMPORTANTE:** Digite exatamente como mostrado acima!
-
-## Passo 5: Ingressar no Domínio (A Parte Principal!)
-
-```bash
-# 1. Descobrir o domínio
-realm discover samba.local
-```
-
-**Você deve ver algo como:**
-```
-samba.local
-  type: kerberos
-  realm-name: SAMBA.LOCAL
-  domain-name: samba.local
-  configured: no
-  server-software: active-directory
-  client-software: sssd
-```
-
-```bash
-# 2. Ingressar no domínio
-sudo realm join --user=administrator samba.local
-```
-
-**Será pedida a senha do administrator do servidor Samba.**
-
-```bash
-# 3. Verificar se ingressou corretamente
-realm list
-```
-
-**Deve mostrar que está configurado (configured: kerberos-member)**
-
-## Passo 6: Configuração Final do Sistema
-
-```bash
-# 1. Permitir criação automática de diretório home para usuários do domínio
-sudo pam-auth-update --enable mkhomedir
-
-# 2. Reiniciar o serviço SSSD
-sudo systemctl restart sssd
-sudo systemctl enable sssd
-
-# 3. Verificar se SSSD está funcionando
-sudo systemctl status sssd
-```
-
-## Passo 7: Teste Básico do Cliente
-
-```bash
-# 1. Testar se consegue obter informações de um usuário do domínio
-# (assumindo que o usuário 'administrator' existe no servidor)
-getent passwd administrator
-
-# 2. Testar autenticação Kerberos
-kinit administrator@SAMBA.LOCAL
-# Digite a senha do administrator
-
-# 3. Verificar ticket Kerberos
-klist
-```
-
-**Se tudo funcionou até aqui, seu cliente está no domínio!**
-
----
-
-# AGORA NO SERVIDOR: Criar Usuários e Grupos
-
-**ATENÇÃO:** Os próximos comandos devem ser executados no SERVIDOR (192.168.10.2), não no cliente!
-
-## Passo 8: Criação de Grupos no Servidor
-
-```bash
-# SSH para o servidor ou acesse diretamente
 ssh usuario@192.168.10.2
+Substitua usuario pelo nome de usuário que você usa no servidor Ubuntu. Você será solicitado a digitar a senha.
 
-# Criar 2 grupos
-sudo samba-tool group add vendas
-sudo samba-tool group add administracao
+Configuração do Hostname (Nome do Servidor)
 
-# Verificar grupos criados
-sudo samba-tool group list | grep -E "(vendas|administracao)"
-```
+Para que serve? Definir um hostname claro (dc para Domain Controller) e configurar o arquivo hosts ajuda o servidor a se identificar corretamente na rede e a resolver nomes internamente, o que é fundamental para o Samba.
 
-## Passo 9: Criação de Usuários no Servidor
+Como fazer:
 
-```bash
-# Criar 4 usuários
-sudo samba-tool user create joao --given-name="João" --surname="Silva"
-sudo samba-tool user create maria --given-name="Maria" --surname="Santos"  
-sudo samba-tool user create pedro --given-name="Pedro" --surname="Costa"
-sudo samba-tool user create ana --given-name="Ana" --surname="Oliveira"
+Verificar o hostname atual:
 
-# Verificar usuários criados
-sudo samba-tool user list | grep -E "(joao|maria|pedro|ana)"
-```
+Bash
 
-**Anote as senhas que você criar para cada usuário!**
+hostname
+Alterar o hostname para dc (Domain Controller):
 
-## Passo 10: Associar Usuários aos Grupos
+Bash
 
-```bash
-# Adicionar usuários aos grupos
-sudo samba-tool group addmembers vendas joao,maria
-sudo samba-tool group addmembers administracao pedro,ana
+sudo hostnamectl set-hostname dc
+Configurar o arquivo hosts:
 
-# João vai pertencer aos DOIS grupos (conforme solicitado)
-sudo samba-tool group addmembers administracao joao
+Bash
 
-# Verificar associações
-sudo samba-tool group listmembers vendas
-sudo samba-tool group listmembers administracao
-```
+sudo nano /etc/hosts
+Adicione as seguintes linhas ao arquivo. Elas mapeiam os nomes de domínio para o endereço IP do seu servidor:
 
----
+127.0.0.1    localhost
+127.0.1.1    samba
+192.168.10.2  dc.samba.local dc
+192.168.10.2  samba.local samba
+Explicação:
 
-# DE VOLTA AO CLIENTE: Teste de Login
+192.168.10.2 dc.samba.local dc: Associa o IP do servidor ao nome de domínio completo (dc.samba.local) e ao nome curto (dc). Isso é essencial para o funcionamento do Samba AD.
 
-## Passo 11: Testar Login com Usuário do Domínio
+192.168.10.2 samba.local samba: Faz o mesmo para o nome do domínio principal (samba.local) e seu nome curto (samba).
 
-**VOLTE para o cliente Ubuntu (192.168.10.4):**
+Verificar as alterações:
 
-```bash
-# 1. Verificar se o cliente consegue "ver" os usuários do domínio
-getent passwd joao
-getent passwd maria
-getent passwd pedro
-getent passwd ana
+Bash
 
-# 2. Testar informações de grupo
-id joao
-```
+hostname -f
+ping -c2 dc.samba.local
+O comando hostname -f deve retornar dc.samba.local. O ping deve ter sucesso.
 
-**Resultado esperado para `id joao`:**
-```
-uid=xxxxx(joao) gid=xxxxx(domain users) groups=xxxxx(domain users),xxxxx(vendas),xxxxx(administracao)
-```
+Configuração do DNS no Servidor
 
-```bash
-# 3. Fazer login via SSH com usuário do domínio
-ssh joao@localhost
-# Digite a senha do usuário joao
-```
+Para que serve? O Samba Active Directory integra seu próprio servidor DNS. Precisamos garantir que o sistema operacional use o DNS do Samba para resolver nomes de domínio internos (samba.local) e, se necessário, encaminhe requisições para a internet.
 
-**Ou faça logout da interface gráfica e faça login com:**
-- Usuário: `joao`
-- Senha: (a senha que você definiu)
+Como fazer:
 
-## Passo 12: Criar Compartilhamentos no Servidor
+Desativar o systemd-resolved: Este serviço padrão do Ubuntu pode interferir com o DNS do Samba.
 
-**VOLTE para o servidor (192.168.10.2):**
+Bash
 
-```bash
-# 1. Criar diretórios para compartilhamento
-sudo mkdir -p /samba/publico
-sudo mkdir -p /samba/vendas-apenas
-sudo mkdir -p /samba/admin-apenas
+sudo systemctl disable --now systemd-resolved
+sudo unlink /etc/resolv.conf
+O unlink remove o link simbólico para o arquivo resolv.conf gerenciado pelo systemd-resolved.
 
-# 2. Definir permissões básicas
-sudo chown -R root:"domain users" /samba/publico
-sudo chown -R root:vendas /samba/vendas-apenas  
-sudo chown -R root:administracao /samba/admin-apenas
+Configurar manualmente o arquivo /etc/resolv.conf:
 
-sudo chmod -R 2775 /samba/
-```
+Bash
 
-```bash
-# 3. Editar configuração do Samba para adicionar compartilhamentos
-sudo nano /etc/samba/smb.conf
-```
+sudo nano /etc/resolv.conf
+Adicione as seguintes linhas:
 
-**Adicione estas seções NO FINAL do arquivo:**
+nameserver    192.168.10.2 # Aponta para o próprio servidor DNS (Samba)
+nameserver    8.8.8.8      # DNS público para resolver nomes da internet 
+search        samba.local  # Define o domínio de busca padrão
+Proteger o arquivo resolv.conf: Isso evita que outros serviços (como o systemd-resolved, se for reativado por engano) sobrescrevam suas configurações.
 
-```ini
-[publico]
-    path = /samba/publico
-    browseable = yes
-    read only = no
-    valid users = @"domain users"
-    create mask = 0664
-    directory mask = 2775
-    comment = Compartilhamento para todos os usuarios
+Bash
 
-[vendas-apenas]  
-    path = /samba/vendas-apenas
-    browseable = yes
-    read only = no
-    valid users = @vendas
-    create mask = 0664
-    directory mask = 2775
-    comment = Apenas para grupo vendas
+sudo chattr +i /etc/resolv.conf
+Instalação do Samba (Active Directory Domain Controller)
 
-[admin-apenas]
-    path = /samba/admin-apenas
-    browseable = yes 
-    read only = no
-    valid users = @administracao
-    create mask = 0664
-    directory mask = 2775
-    comment = Apenas para grupo administracao
-```
+Para que serve? Estes pacotes são a base para transformar seu Ubuntu em um Controlador de Domínio Active Directory, permitindo a autenticação de usuários e o gerenciamento de recursos.
 
-```bash
-# 4. Reiniciar o Samba
-sudo systemctl restart samba-ad-dc
+Como fazer:
 
-# 5. Verificar se a configuração está correta
-testparm
-```
+Atualizar a lista de pacotes novamente:
 
-## Passo 13: Teste de Acesso aos Compartilhamentos
+Bash
 
-**DE VOLTA ao cliente (192.168.10.4):**
+sudo apt-get update
+Instalar os pacotes necessários:
 
-```bash
-# 1. Instalar utilitários para acessar compartilhamentos
-sudo apt install cifs-utils
+Bash
 
-# 2. Testar acesso com usuário João (tem acesso a todos)
-smbclient //192.168.10.2/publico -U joao
-# Digite a senha, depois digite: ls, quit
+sudo apt install -y acl attr samba samba-dsdb-modules samba-vfs-modules smbclient winbind libpam-winbind libnss-winbind libpam-krb5 krb5-config krb5-user dnsutils chrony net-tools
+Configuração durante a instalação: Durante o processo, você pode ser solicitado a configurar o Kerberos. Use as seguintes informações:
 
-smbclient //192.168.10.2/vendas-apenas -U joao  
-# Digite a senha, depois digite: ls, quit
+Realm: SAMBA.LOCAL
 
-smbclient //192.168.10.2/admin-apenas -U joao
-# Digite a senha, depois digite: ls, quit
+Servidor Kerberos: dc.samba.local
 
-# 3. Testar com usuário Maria (só vendas e público)
-smbclient //192.168.10.2/publico -U maria
-smbclient //192.168.10.2/vendas-apenas -U maria
-smbclient //192.168.10.2/admin-apenas -U maria  # Deve DAR ERRO!
+Servidor administrativo: dc.samba.local
 
-# 4. Testar com usuário Pedro (só admin e público)  
-smbclient //192.168.10.2/admin-apenas -U pedro
-smbclient //192.168.10.2/vendas-apenas -U pedro  # Deve DAR ERRO!
-```
+Desativar serviços Samba desnecessários (NMBd e SMBd): Quando o Samba atua como AD DC, ele usa um serviço diferente (samba-ad-dc). Os serviços smbd, nmbd e winbind podem causar conflitos.
 
----
+Bash
 
-# RESUMO FINAL - Checklist das Atividades
+sudo systemctl disable --now smbd nmbd winbind
+Habilitar e iniciar o serviço samba-ad-dc:
 
-## ✅ Atividades Obrigatórias Concluídas:
+Bash
 
-**1. ✅ Ingressar o cliente Ubuntu ao domínio Samba Active Directory**
-- Cliente configurado na rede 192.168.10.4/24
-- DNS apontando para o servidor (192.168.10.2)
-- Ingressado via `realm join`
+sudo systemctl unmask samba-ad-dc # Remove qualquer máscara que possa impedir o serviço
+sudo systemctl enable samba-ad-dc # Habilita o serviço para iniciar com o sistema
+Provisionamento do Active Directory
 
-**2. ✅ Criar quatro usuários e dois grupos no servidor Samba**
-- Usuários: joao, maria, pedro, ana
-- Grupos: vendas, administracao
+Para que serve? Este é o passo que realmente transforma o Samba em um Controlador de Domínio, criando a estrutura do AD, o banco de dados de usuários, grupos, etc.
 
-**3. ✅ Associar os usuários aos grupos de forma organizada**
-- joao: vendas + administracao (pertence a 2 grupos)
-- maria: vendas
-- pedro: administracao  
-- ana: administracao
+Como fazer:
 
-**4. ✅ Realizar login no cliente Ubuntu utilizando usuário do domínio**
-- Testado via SSH: `ssh joao@localhost`
-- Pode fazer login na interface gráfica também
+Fazer backup da configuração padrão do Samba: O smb.conf padrão não é usado para um AD DC, então o movemos para um backup.
 
-**5. ✅ Criar diretórios compartilhados com permissões distintas**
-- `/samba/publico` - todos os usuários do domínio
-- `/samba/vendas-apenas` - apenas grupo vendas
-- `/samba/admin-apenas` - apenas grupo administracao
+Bash
 
-**6. ✅ Testar acesso aos compartilhamentos com diferentes usuários**
-- João: acessa todos (está nos 2 grupos)
-- Maria: acessa público e vendas (só grupo vendas)
-- Pedro: acessa público e admin (só grupo administracao)
+sudo mv /etc/samba/smb.conf /etc/samba/smb.conf.orig
+Provisionar o domínio:
 
-## 🔧 Comandos de Verificação Rápida
+Bash
 
-### No Cliente:
-```bash
-# Verificar se está no domínio
-realm list
+sudo samba-tool domain provision
+Durante o provisionamento, você será guiado por algumas perguntas. Responda da seguinte forma:
 
-# Verificar usuários do domínio
-getent passwd joao maria pedro ana
 
-# Testar login
-ssh joao@localhost
-```
+Realm [SAMBA.LOCAL]: Pressione Enter (já preenchido com o nome do domínio )
 
-### No Servidor:
-```bash
-# Verificar usuários e grupos
-sudo samba-tool user list | grep -E "(joao|maria|pedro|ana)"
-sudo samba-tool group list | grep -E "(vendas|administracao)"
+Domain [SAMBA]: Pressione Enter (já preenchido)
 
-# Verificar membros dos grupos
-sudo samba-tool group listmembers vendas
-sudo samba-tool group listmembers administracao
+Server Role (dc, member, standalone) [dc]: Pressione Enter (para Domain Controller)
 
-# Status do serviço
+DNS backend (SAMBA_INTERNAL, BIND9_DLZ, NONE) [SAMBA_INTERNAL]: Pressione Enter (o Samba gerenciará o DNS internamente)
+
+DNS forwarder (IP address or hostname): 8.8.8.8 (para o Samba encaminhar requisições DNS não-locais para a internet)
+
+Administrator password: (crie uma senha forte para o administrador do domínio)
+
+Retype password: (repita a senha)
+
+Configuração do Kerberos no Servidor
+
+Para que serve? O Kerberos é o protocolo de autenticação usado no Active Directory. Precisamos garantir que o sistema use o arquivo de configuração do Kerberos gerado pelo Samba.
+
+Como fazer:
+
+Fazer backup do arquivo krb5.conf existente:
+
+Bash
+
+sudo mv /etc/krb5.conf /etc/krb5.conf.orig
+Copiar o arquivo krb5.conf gerado pelo Samba:
+
+Bash
+
+sudo cp /var/lib/samba/private/krb5.conf /etc/krb5.conf
+Iniciar o serviço samba-ad-dc:
+
+Bash
+
+sudo systemctl start samba-ad-dc
 sudo systemctl status samba-ad-dc
-```
+Verifique se o serviço está active (running).
 
-## 🚨 Problemas Comuns e Soluções
+Configuração de Sincronização de Tempo (NTP)
 
-**Problema: "realm discover" não encontra o domínio**
-```bash
-# Verificar DNS
-ping samba.local
-nslookup dc.samba.local
-```
+Para que serve? A sincronização de tempo é crítica para o Kerberos e o Active Directory. Se houver uma diferença de tempo significativa entre o servidor e os clientes, a autenticação falhará. O Chrony é um serviço NTP que pode ser integrado ao Samba.
 
-**Problema: Login não funciona**
-```bash
-# Reiniciar SSSD no cliente
-sudo systemctl restart sssd
-sudo systemctl status sssd
-```
+Como fazer:
 
-**Problema: Compartilhamento não acessível**
-```bash
-# No servidor, verificar configuração
+Configurar permissões para o Chrony:
+
+Bash
+
+sudo apt-get update
+sudo chown root:_chrony /var/lib/samba/ntp_signd/
+sudo chmod 750 /var/lib/samba/ntp_signd/
+Configurar o Chrony:
+
+Bash
+
+sudo nano /etc/chrony/chrony.conf
+Adicione as seguintes linhas ao final do arquivo:
+
+bindcmdaddress 192.168.10.2  # Vincula o comando de controle do Chrony ao IP do servidor
+allow 192.168.10.0/24      # Permite que a rede local sincronize o tempo com este servidor
+ntpsigndsocket /var/lib/samba/ntp_signd # Integra o Chrony com o Samba
+Reiniciar e verificar o serviço Chrony:
+
+Bash
+
+sudo systemctl restart chronyd
+sudo systemctl status chronyd
+Confirme que o serviço está active (running).
+
+Verificação e Testes Finais no Servidor
+
+Para que serve? Confirmar que o Samba AD está funcionando corretamente e que a resolução de nomes e autenticação Kerberos estão ok.
+
+Como fazer:
+
+Verificar resolução de hosts DNS:
+
+Bash
+
+host -t A samba.local      # Deve retornar o IP do servidor
+host -t A dc.samba.local   # Deve retornar o IP do servidor
+Verificar registros SRV do Kerberos e LDAP:
+
+Bash
+
+host -t SRV _kerberos._udp.samba.local # Deve retornar o hostname do servidor
+host -t SRV _ldap._tcp.samba.local     # Deve retornar o hostname do servidor
+Verificar recursos Samba:
+
+Bash
+
+smbclient -L samba.local -N # Deve listar os compartilhamentos padrão do Samba AD
+Teste de autenticação Kerberos:
+
+Bash
+
+kinit administrator@SAMBA.LOCAL # Será solicitada a senha do administrador do domínio
+klist                           # Deve mostrar um ticket Kerberos válido
+Este passo é crucial para confirmar que a autenticação Kerberos está funcionando.
+
+Teste de acesso SMB:
+
+Bash
+
+sudo smbclient //localhost/netlogon -U 'administrator' # Acessa um compartilhamento padrão do AD
+Você deve conseguir se conectar.
+
+Verificar a configuração do Samba:
+
+Bash
+
 testparm
+sudo samba-tool domain level show
+testparm verifica a sintaxe do smb.conf. samba-tool domain level show mostra o nível funcional do domínio.
+
+Gerenciamento de Usuários e Grupos no Servidor Samba
+
+
+Para que serve? É aqui que você cria os usuários e grupos solicitados.
+
+Como fazer:
+
+Alterar senha do administrador (boa prática após o provisionamento):
+
+Bash
+
+sudo samba-tool user setpassword administrator
+
+Criar quatro usuários: 
+
+Bash
+
+sudo samba-tool user create usuario1 --description="Usuário Teste 1"
+sudo samba-tool user create usuario2 --description="Usuário Teste 2"
+sudo samba-tool user create usuario3 --description="Usuário Teste 3"
+sudo samba-tool user create usuario4 --description="Usuário Teste 4"
+Para cada usuário, será solicitada uma senha. Crie senhas para cada um.
+
+
+Criar dois grupos: 
+
+Bash
+
+sudo samba-tool group add grupoA
+sudo samba-tool group add grupoB
+
+Associar usuários aos grupos: 
+
+Associe usuario1, usuario2 e usuario3 ao grupoA:
+
+Bash
+
+sudo samba-tool group addmembers grupoA usuario1,usuario2,usuario3
+Associe 
+
+usuario3 e usuario4 ao grupoB (note que usuario3 pertencerá a ambos os grupos ):
+
+Bash
+
+sudo samba-tool group addmembers grupoB usuario3,usuario4
+Listar para verificar:
+
+Bash
+
+sudo samba-tool user list
+sudo samba-tool group list
+sudo samba-tool group listmembers grupoA
+sudo samba-tool group listmembers grupoB
+Criação e Configuração de Diretório Compartilhado
+
+
+Para que serve? Para que os usuários do domínio possam acessar arquivos e pastas na rede com permissões específicas, conforme solicitado.
+
+Como fazer:
+
+Criar um diretório para o compartilhamento:
+
+Bash
+
+sudo mkdir -p /srv/samba/compartilhado
+Definir permissões de sistema de arquivos: Permite que os membros do domínio acessem o diretório.
+
+Bash
+
+sudo chown -R root:"Domain Users" /srv/samba/compartilhado
+sudo chmod -R 2770 /srv/samba/compartilhado
+chown -R root:"Domain Users": Define o proprietário como root e o grupo como "Domain Users" (grupo padrão do Samba AD que inclui todos os usuários do domínio).
+
+chmod -R 2770:
+
+2: Define o "setgid bit", o que significa que novos arquivos e diretórios criados dentro de /srv/samba/compartilhado herdarão o grupo "Domain Users".
+
+770: Permissões de leitura, escrita e execução para o proprietário (root) e para o grupo (Domain Users). Nenhuma permissão para "outros".
+
+Editar o arquivo smb.conf para criar o compartilhamento:
+
+Bash
+
+sudo nano /etc/samba/smb.conf
+Adicione o seguinte bloco ao final do arquivo:
+
+Ini, TOML
+
+[compartilhado]
+    path = /srv/samba/compartilhado
+    read only = no
+    browseable = yes
+    valid users = @grupoA @grupoB  # Grupos permitidos a acessar o compartilhamento
+    write list = @grupoA           # Apenas membros de 'grupoA' podem escrever
+    force group = "Domain Users"   # Garante que arquivos criados pertençam ao grupo
+    create mask = 0660             # Permissões para novos arquivos
+    directory mask = 0770          # Permissões para novos diretórios
+Explicação:
+
+path: O caminho do diretório a ser compartilhado.
+
+read only = no: Permite operações de escrita.
+
+browseable = yes: O compartilhamento será visível na rede.
+
+valid users = @grupoA @grupoB: Somente usuários que são membros do grupoA ou grupoB podem acessar este compartilhamento.
+
+write list = @grupoA: Define que apenas os membros de grupoA terão permissão de escrita. Os membros de grupoB (que não estão em grupoA) terão apenas permissão de leitura.
+
+Reiniciar o serviço Samba para aplicar as mudanças:
+
+Bash
+
 sudo systemctl restart samba-ad-dc
-```
+Configuração do Cliente Ubuntu
+O cliente Ubuntu, com o IP 
 
-## 📝 Entrega do Trabalho
+192.168.10.4/24, será ingressado no domínio Samba Active Directory.
 
-Documente os seguintes pontos:
-1. Screenshots do cliente no domínio (`realm list`)
-2. Lista de usuários criados (`sudo samba-tool user list`)
-3. Membros dos grupos (`sudo samba-tool group listmembers`)
-4. Teste de login com usuário do domínio
-5. Acesso aos compartilhamentos com diferentes usuários
-6. Configuração de rede do cliente (`ip -br a`)
+
+Objetivo: Ingressar o cliente Ubuntu no domínio SAMBA.LOCAL e testar o acesso aos compartilhamentos.
+
+
+Passos:
+
+Configuração de Rede do Cliente
+
+Para que serve? O cliente precisa ter um endereço IP na mesma rede do servidor e, crucialmente, deve usar o servidor Samba AD como seu servidor DNS primário para conseguir resolver o nome do domínio.
+
+Como fazer:
+
+Acessar o diretório de configuração do Netplan:
+
+Bash
+
+cd /etc/netplan
+Editar o arquivo de configuração do Netplan:
+
+Bash
+
+sudo nano 01-netcfg.yaml # ou o nome do seu arquivo .yaml
+Adicione ou modifique as seguintes linhas (adapte o nome da interface, por exemplo, enp0s3):
+
+YAML
+
+network:
+  version: 2
+  ethernets:
+    enp0s3: # Adapte o nome da interface de rede do seu cliente
+      [cite_start]addresses: [192.168.10.4/24] # IP do cliente Ubuntu 
+      nameservers:
+        [cite_start]addresses: [192.168.10.2, 8.8.8.8] # O primeiro DNS deve ser o IP do seu DC [cite: 23]
+        [cite_start]search: [samba.local] # O domínio de busca 
+Aplicar as configurações de rede:
+
+Bash
+
+sudo netplan apply
+Verificar a conectividade:
+
+Bash
+
+ping 192.168.10.2    # Deve pingar o servidor
+ping dc.samba.local  # Deve resolver o nome do servidor
+ping samba.local     # Deve resolver o nome do domínio
+Instalar Pacotes Necessários para Ingressar no Domínio
+
+Para que serve? Estes pacotes (realmd, sssd, adcli, krb5-user, etc.) permitem que o Ubuntu se integre a um domínio Active Directory, gerenciando usuários, grupos e autenticação.
+
+Como fazer:
+
+Bash
+
+sudo apt update
+sudo apt install -y realmd sssd sssd-tools samba-common samba-common-bin adcli krb5-user packagekit-tools
+Configuração do Kerberos no Cliente
+
+Para que serve? O cliente também precisa saber onde encontrar o servidor Kerberos para autenticação no domínio.
+
+Como fazer:
+
+Durante a instalação dos pacotes acima, você provavelmente será solicitado a configurar o Kerberos. Use:
+
+Realm: SAMBA.LOCAL
+
+Servidor Kerberos: dc.samba.local
+
+Se não for perguntado ou se precisar corrigir, edite manualmente o arquivo /etc/krb5.conf:
+
+Bash
+
+sudo nano /etc/krb5.conf
+Adicione ou modifique para:
+
+Ini, TOML
+
+[libdefaults]
+        default_realm = SAMBA.LOCAL
+        dns_lookup_realm = true
+        dns_lookup_kdc = true
+
+[realms]
+        SAMBA.LOCAL = {
+                kdc = dc.samba.local
+                admin_server = dc.samba.local
+        }
+
+[domain_realm]
+        .samba.local = SAMBA.LOCAL
+        samba.local = SAMBA.LOCAL
+Ingressar o Cliente Ubuntu no Domínio Samba Active Directory
+
+Para que serve? Este é o passo que realmente conecta o cliente ao domínio, permitindo que ele reconheça os usuários e grupos do AD.
+
+Como fazer:
+
+Descobrir o domínio (opcional, apenas para verificar):
+
+Bash
+
+sudo realm discover SAMBA.LOCAL
+Deve retornar informações sobre o seu domínio.
+
+Ingressar no domínio:
+
+Bash
+
+sudo realm join -U administrator SAMBA.LOCAL
+Será solicitada a senha do usuário administrator do domínio Samba que você configurou no servidor.
+
+Verificação: Você pode verificar se o cliente foi ingressado com:
+
+Bash
+
+realm list
+Configuração do SSSD (System Security Services Daemon)
+
+Para que serve? O SSSD é um serviço que gerencia a autenticação e as informações de usuários de fontes externas (como o Active Directory) no sistema Linux. O comando realm join configura o SSSD automaticamente.
+
+Como fazer (verificação e reinício):
+
+Verifique o arquivo de configuração do SSSD:
+
+Bash
+
+sudo cat /etc/sssd/sssd.conf
+Ele deve conter informações sobre o domínio samba.local.
+
+Reinicie o serviço SSSD para garantir que as configurações sejam aplicadas:
+
+Bash
+
+sudo systemctl restart sssd
+Teste se os usuários do domínio são reconhecidos:
+
+Bash
+
+id usuario1@samba.local
+id usuario3@samba.local
+Isso deve mostrar as informações de UID, GID e grupos do usuário do domínio.
+
+Realizar Login no Cliente Ubuntu com Usuário do Domínio
+
+
+Para que serve? Testar a funcionalidade principal: autenticar usuários do domínio no cliente Ubuntu.
+
+Como fazer:
+
+No terminal (para testar a autenticação):
+
+Bash
+
+su - usuario1@samba.local
+Será solicitada a senha do usuario1. Se o login for bem-sucedido, você estará logado como o usuário do domínio no terminal. Digite exit para sair.
+
+No ambiente gráfico (interface de usuário):
+
+Reinicie o cliente Ubuntu.
+
+Na tela de login, você poderá ter a opção de "Not listed?" ou "Outro usuário". Clique nela.
+
+Digite o nome de usuário no formato usuario1@samba.local ou, dependendo da configuração do SSSD, apenas usuario1.
+
+Digite a senha do usuário.
+
+Se tudo estiver correto, você fará login no ambiente gráfico com o usuário do domínio. O diretório home do usuário será criado automaticamente (por exemplo, /home/usuario1@samba.local).
+
+Testar o Acesso ao Compartilhamento a partir do Cliente Ubuntu
+
+
+Para que serve? Verificar se os usuários do domínio podem acessar o compartilhamento criado no servidor, com as permissões corretas.
+
+Como fazer:
+
+Certifique-se de estar logado como um dos usuários do domínio (ex: usuario1@samba.local).
+
+Criar um ponto de montagem para o compartilhamento:
+
+Bash
+
+mkdir ~/compartilhamento_samba
+Montar o compartilhamento do Samba:
+
+Bash
+
+sudo mount -t cifs //dc.samba.local/compartilhado ~/compartilhamento_samba -o username=usuario1,domain=SAMBA.LOCAL,uid=$(id -u),gid=$(id -g),nounix,iocharset=utf8
+//dc.samba.local/compartilhado: Caminho UNC do compartilhamento no servidor.
+
+~/compartilhamento_samba: Onde o compartilhamento será montado no cliente.
+
+username=usuario1: O nome de usuário do domínio para autenticação.
+
+domain=SAMBA.LOCAL: O domínio ao qual o usuário pertence.
+
+uid=$(id -u),gid=$(id -g): Garante que os arquivos e diretórios montados pertençam ao usuário logado e seu grupo primário, facilitando o acesso.
+
+nounix: Desabilita extensões Unix para o Samba (às vezes causa problemas).
+
+iocharset=utf8: Garante a codificação correta de caracteres.
+
+Você será solicitado a digitar a senha do usuario1.
+
+Testar o acesso e as permissões:
+
+Com usuario1 (membro de grupoA e grupoB - tem permissão de escrita):
+
+Bash
+
+touch ~/compartilhamento_samba/teste_usuario1.txt
+echo "Hello from user1" > ~/compartilhamento_samba/arquivo1.txt
+ls -l ~/compartilhamento_samba/
+Você deve conseguir criar arquivos e diretórios.
+
+Desmonte o compartilhamento:
+
+Bash
+
+sudo umount ~/compartilhamento_samba
+Repita o teste com usuario4 (membro de grupoB - tem apenas permissão de leitura, conforme sua configuração no smb.conf):
+
+Logue-se como usuario4@samba.local no cliente Ubuntu.
+
+Monte o compartilhamento usando as credenciais de usuario4.
+
+Tente criar um arquivo:
+
+Bash
+
+touch ~/compartilhamento_samba/teste_usuario4.txt
+Isso deve falhar com uma mensagem de "Permissão negada", confirmando que as permissões distintas estão funcionando.
+
+Você ainda deve conseguir ler arquivos existentes no compartilhamento.
+
+Este guia detalhado cobre todos os passos para configurar o servidor e o cliente, permitindo que você compreenda e execute o cenário proposto no PDF.
