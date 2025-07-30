@@ -554,4 +554,94 @@ E verá o ticket do Kerberos ativo.
 
 ---
 
-Se quiser, posso adaptar o conteúdo do `krb5.conf` para seu domínio, servidor e rede exatos. Deseja que eu personalize com base na sua configuração?
+O erro mostrado na imagem indica que o cliente Ubuntu não está conseguindo se comunicar com o servidor Kerberos (KDC) do domínio `SAMBA.LOCAL`. Isso geralmente acontece por causa de problemas na resolução de nome ou na configuração incorreta do arquivo `/etc/krb5.conf`.
+
+---
+
+### ✅ Problemas detectados:
+
+1. **Arquivo `/etc/krb5.conf` ausente**:
+
+   * A mensagem mostra:
+
+     ```bash
+     mv: não foi possível obter estado de '/etc/krb5.conf': Arquivo ou diretório inexistente
+     ```
+   * Isso indica que o arquivo de configuração do Kerberos **não existe**, então o `kinit` está tentando se comunicar com um KDC que ele não sabe onde está.
+
+2. **Erro do `kinit`**:
+
+   * A mensagem:
+
+     ```bash
+     kinit: Cannot contact any KDC for realm 'SAMBA.LOCAL' while getting initial credentials
+     ```
+   * Significa que **não foi possível resolver ou alcançar o servidor Kerberos** para o realm/domínio `SAMBA.LOCAL`.
+
+---
+
+### ✅ Solução passo a passo:
+
+#### 1. Criar ou configurar corretamente o arquivo `/etc/krb5.conf`
+
+Crie o arquivo com este conteúdo básico (ajuste se o hostname ou IP do seu DC for diferente):
+
+```ini
+[libdefaults]
+    default_realm = SAMBA.LOCAL
+    dns_lookup_realm = false
+    dns_lookup_kdc = false
+
+[realms]
+    SAMBA.LOCAL = {
+        kdc = 192.168.10.2
+        admin_server = 192.168.10.2
+    }
+
+[domain_realm]
+    .samba.local = SAMBA.LOCAL
+    samba.local = SAMBA.LOCAL
+```
+
+> Substitua `192.168.10.2` pelo IP do seu servidor Samba AD, se for diferente.
+
+Salve o arquivo como `/etc/krb5.conf`.
+
+---
+
+#### 2. Testar conectividade e DNS
+
+Verifique se o nome do domínio é resolvido corretamente:
+
+```bash
+ping dc.samba.local
+```
+
+Ou, se estiver usando somente IP:
+
+```bash
+ping 192.168.10.2
+```
+
+Você também pode adicionar o domínio ao `/etc/hosts` para garantir que resolva:
+
+```bash
+192.168.10.2    dc.samba.local dc
+```
+
+---
+
+#### 3. Testar novamente o `kinit`
+
+Depois do ajuste do arquivo e conectividade, teste novamente:
+
+```bash
+kinit Administrator
+```
+
+Se pedir senha e não exibir erro, está funcionando.
+
+---
+
+Se quiser, posso gerar o conteúdo completo do `/etc/krb5.conf` baseado no seu cenário com Samba AD. Deseja isso?
+
