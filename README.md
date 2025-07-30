@@ -481,3 +481,77 @@ smbclient //192.168.10.2/vendas-apenas -U pedro  # Deve dar erro
 - **ana:** (senha do usuário)
 
 **🎯 Agora você tem o guia completo desde a instalação até os testes finais!**
+
+O erro que está aparecendo várias vezes é:
+
+```
+mv: não foi possível obter estado de '/etc/krb5.conf': Arquivo ou diretório inexistente
+```
+
+Isso significa que o arquivo `/etc/krb5.conf` **não existe no seu sistema** no momento.
+
+Esse arquivo é essencial para o funcionamento do Kerberos, especialmente em configurações de domínio Samba AD, como a que você está montando.
+
+---
+
+### ✅ Como resolver:
+
+Você precisa **criar o arquivo `/etc/krb5.conf`** com o conteúdo correto. Como o seu domínio é `samba.local` e seu servidor (DC) está com o IP `192.168.10.2`, aqui está um exemplo básico de configuração que deve funcionar:
+
+#### 🛠️ Passo 1 – Criar o arquivo `/etc/krb5.conf`
+
+Execute:
+
+```bash
+sudo nano /etc/krb5.conf
+```
+
+E cole o seguinte conteúdo:
+
+```ini
+[libdefaults]
+    default_realm = SAMBA.LOCAL
+    dns_lookup_realm = false
+    dns_lookup_kdc = true
+    ticket_lifetime = 24h
+    renew_lifetime = 7d
+    forwardable = true
+    rdns = false
+    default_tgs_enctypes = arcfour-hmac-md5
+    default_tkt_enctypes = arcfour-hmac-md5
+    permitted_enctypes = arcfour-hmac-md5
+
+[realms]
+    SAMBA.LOCAL = {
+        kdc = dc.samba.local
+        admin_server = dc.samba.local
+    }
+
+[domain_realm]
+    .samba.local = SAMBA.LOCAL
+    samba.local = SAMBA.LOCAL
+```
+
+---
+
+### ✅ Passo 2 – Testar se o Kerberos está funcionando
+
+Depois de salvar o arquivo, teste com:
+
+```bash
+kinit Administrator
+```
+
+Ele deve pedir a senha do domínio Samba AD.
+
+Se tudo estiver correto, use:
+
+```bash
+klist
+```
+
+E verá o ticket do Kerberos ativo.
+
+---
+
+Se quiser, posso adaptar o conteúdo do `krb5.conf` para seu domínio, servidor e rede exatos. Deseja que eu personalize com base na sua configuração?
