@@ -1,210 +1,193 @@
-Ótimo! Como a configuração do servidor Samba AD já está feita e funcionando, agora vamos ao **passo a passo completo para configurar o Ubuntu Desktop como cliente do domínio Samba AD**, conforme seu cenário:
+Com base nas imagens que você forneceu, aqui está a documentação com os comandos e suas respectivas descrições:
 
----
+### Instalação e Configuração Inicial
 
-## 🧷 **CLIENTE UBUNTU DESKTOP – Ingressar no Domínio Samba**
-
-### ✅ 1. **Atualizar e Instalar os Pacotes Necessários**
+**Instalar SSH:**
 
 ```bash
-sudo apt update
-sudo apt install -y realmd sssd sssd-tools adcli samba-common-bin oddjob oddjob-mkhomedir packagekit krb5-user libnss-sss libpam-sss
+sudo apt-get install ssh
 ```
 
-> Durante a instalação, informe:
-
-* **Realm**: `SAMBA.LOCAL`
-* **Servidor KDC**: `dc.samba.local`
-* **Administração**: `dc.samba.local`
-
----
-
-### ✅ 2. **Configurar o DNS do Cliente Ubuntu**
-
-Edite o `/etc/resolv.conf`:
+**Verificar status do SSH:**
 
 ```bash
-sudo nano /etc/resolv.conf
+sudo systemctl status ssh
 ```
 
-```txt
-nameserver 192.168.10.2
-search samba.local
-```
-
-Proteja o arquivo:
+**Mudar o hostname:**
 
 ```bash
-sudo chattr +i /etc/resolv.conf
+sudo hostnamectl set-hostname ud101
+sudo hostname -f
 ```
 
----
-
-### ✅ 3. **Testar Resolução DNS**
+**Configurar o arquivo /etc/hosts:**
 
 ```bash
-ping dc.samba.local
-host -t SRV _kerberos._udp.samba.local
+sudo nano /etc/hosts
+# Adicione as linhas:
+# 192.168.1.8 clockwork.local clockwork
+# 192.168.1.8 dc.clockwork.local dc
 ```
 
----
-
-### ✅ 4. **Ingressar no Domínio Samba**
+**Verificar conectividade (ping):**
 
 ```bash
-sudo realm join --user=administrator samba.local
+ping -c2 clockwork.local
 ```
 
-> Será solicitada a senha do `administrator` do domínio.
-> Se aparecer erro de "realm not found", verifique DNS e hora do sistema.
-
----
-
-### ✅ 5. **Verificar se Ingressou com Sucesso**
+**Instalar e configurar NTPDATE:**
 
 ```bash
-realm list
+sudo apt-get install ntpdate
+sudo ntpdate -q clockwork.local
+sudo ntpdate clockwork.local
 ```
 
-Você deve ver algo assim:
-
-```txt
-realm-name: SAMBA.LOCAL
-domain-name: samba.local
-configured: kerberos-member
-```
-
----
-
-### ✅ 6. **Permitir Login de Usuários do Domínio**
-
-Edite:
+**Instalar pacotes necessários (Samba, Kerberos, Winbind):**
 
 ```bash
-sudo nano /etc/pam.d/common-session
+sudo apt-get install samba krb5-config krb5-user winbind libpam-winbind libnss-winbind libpam-krb5
 ```
 
-Adicione no final:
-
-```txt
-session required pam_mkhomedir.so skel=/etc/skel umask=0022
-```
-
-Isso cria automaticamente o diretório home dos usuários do domínio no primeiro login.
-
----
-
-### ✅ 7. **Testar Login com Usuário do Domínio**
-
-Saia da sessão ou vá para “Trocar usuário” e entre com:
-
-**Usuário**: `samba.local\nome_do_usuario`
-**Senha**: (senha definida no Samba)
-
----
-
-## 👥 **SERVIDOR – Criação de Usuários e Grupos**
-
-### ✅ 8. **Criar Usuários no Samba**
+**Verificar autenticação Kerberos:**
 
 ```bash
-sudo samba-tool user create joao
-sudo samba-tool user create maria
-sudo samba-tool user create pedro
-sudo samba-tool user create ana
+kinit administrator@CLOCKWORK.LOCAL
+klist
 ```
 
-### ✅ 9. **Criar Grupos e Adicionar Membros**
+**Fazer backup e criar novo arquivo de configuração do Samba:**
 
 ```bash
-sudo samba-tool group add professores
-sudo samba-tool group add alunos
-
-sudo samba-tool group addmembers professores joao ana
-sudo samba-tool group addmembers alunos maria ana
+mv /etc/samba/smb.conf /etc/samba/smb.conf.initial
+nano /etc/samba/smb.conf
 ```
 
-> A usuária **ana** está nos dois grupos.
+-----
 
----
+### Configuração do Samba e Autenticação
 
-## 📁 **COMPARTILHAMENTO DE PASTAS NO SERVIDOR**
-
-### ✅ 10. **Criar Diretórios e Definir Permissões**
-
-```bash
-sudo mkdir -p /samba/professores
-sudo mkdir -p /samba/alunos
-
-sudo groupadd samba-professores
-sudo groupadd samba-alunos
-
-sudo chown :samba-professores /samba/professores
-sudo chown :samba-alunos /samba/alunos
-
-sudo chmod 2770 /samba/professores
-sudo chmod 2770 /samba/alunos
-```
-
-### ✅ 11. **Mapear Grupos do Samba para o Linux**
-
-```bash
-sudo net groupmap add ntgroup="professores" unixgroup=samba-professores type=domain
-sudo net groupmap add ntgroup="alunos" unixgroup=samba-alunos type=domain
-```
-
-### ✅ 12. **Configurar o `smb.conf`**
-
-Edite:
-
-```bash
-sudo nano /etc/samba/smb.conf
-```
-
-Adicione ao final:
+**Configurar o arquivo `/etc/samba/smb.conf` (conteúdo parcial):**
 
 ```ini
-[professores]
-    path = /samba/professores
-    valid users = @"SAMBA\professores"
-    read only = no
-    force group = samba-professores
-    create mask = 0660
-    directory mask = 0770
-
-[alunos]
-    path = /samba/alunos
-    valid users = @"SAMBA\alunos"
-    read only = no
-    force group = samba-alunos
-    create mask = 0660
-    directory mask = 0770
+[global]
+    workgroup = CLOCKWORK
+    realm = CLOCKWORK.LOCAL
+    netbios name = ud101
+    security = ADS
+    dns forwarder = 192.168.1.8
+    idmap config * : backend = tdb
+    idmap config * : range = 50000-1000000
+    template homedir = /home/%D/%U
+    template shell = /bin/bash
+    winbind use default domain = true
+    winbind offline logon = false
+    winbind nss info = rfc2307
+    winbind enum users = yes
+    winbind enum groups = yes
+    vfs objects = acl_xattr
+    map acl inherit = Yes
+    store dos attributes = Yes
 ```
 
-### ✅ 13. **Reiniciar o Samba**
+**Reiniciar os serviços do Samba:**
 
 ```bash
-sudo systemctl restart samba-ad-dc
+sudo systemctl restart smbd nmbd
 ```
 
----
+**Parar serviços desnecessários:**
 
-## 🧪 **TESTES FINAIS**
+```bash
+sudo systemctl stop samba-ad-dc
+```
 
-* Tente acessar via Nautilus do Ubuntu Desktop:
+**Habilitar serviços do Samba para iniciar com o sistema:**
 
-  ```bash
-  smb://samba.local/professores
-  ```
+```bash
+sudo systemctl enable smbd nmbd
+```
 
-  Faça login com `samba.local\ana` ou `samba.local\joao`.
+**Unir o Ubuntu ao domínio SAMBA AD:**
 
-* Acesse `/samba/alunos` com `maria` e verifique permissões diferentes.
+```bash
+sudo net ads join -U administrator
+```
 
----
+**Listar computadores no SAMBA AD:**
 
-Se quiser, posso gerar um **PDF de documentação** para esse passo a passo também. Deseja isso?
+```bash
+sudo samba-tool computer list
+```
 
-sudo net groupmap modify ntgroup="professores" unixgroup=samba-professores
+-----
 
-sudo net groupmap modify ntgroup="alunos" unixgroup=samba-alunos
+### Configurar a Autenticação de Contas AD
+
+**Editar o arquivo `/etc/nsswitch.conf`:**
+
+```bash
+sudo nano /etc/nsswitch.conf
+# Altere as linhas para:
+# passwd: compat winbind
+# group: compat winbind
+# shadow: compat winbind
+# hosts: files dns
+```
+
+**Reiniciar o serviço Winbind:**
+
+```bash
+sudo systemctl restart winbind
+```
+
+**Listar usuários e grupos do domínio:**
+
+```bash
+wbinfo -u
+wbinfo -g
+```
+
+**Verificar o módulo Winbind com o comando `getent`:**
+
+```bash
+sudo getent passwd | grep administrator
+sudo getent group|grep 'domain admins'
+```
+
+-----
+
+### Configuração Adicional de Autenticação e Permissões
+
+**Configurar `pam-auth-update` para autenticação com contas de domínio:**
+
+```bash
+sudo pam-auth-update
+```
+
+**Editar o arquivo `/etc/pam.d/common-account` para criar diretórios home automaticamente:**
+
+```bash
+nano /etc/pam.d/common-account
+# Adicionar a linha no final do arquivo:
+# session required pam_mkhomedir.so skel=/etc/skel/ umask=0022
+```
+
+**Autenticar-se com a conta Samba4 AD:**
+
+```bash
+su administrator
+```
+
+**Adicionar conta de domínio com privilégios de root:**
+
+```bash
+sudo usermod -aG sudo administrator
+```
+
+**Autenticar-se com GUI (comando de exemplo):**
+
+```bash
+administrator@clockwork.local
+```
